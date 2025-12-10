@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/mongodb';
 import { Band } from '@/lib/bands';
+import { v4 as uuidv4 } from 'uuid';
 
 interface UserBand extends Band {
   addedBy: string[];
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     // Create new band
     const newBand: UserBand = {
-      id: `band-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: uuidv4(),
       name: name.trim(),
       isNewAddition: true,
       addedBy: [sessionName],
