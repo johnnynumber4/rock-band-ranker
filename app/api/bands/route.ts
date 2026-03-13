@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
     if (!name || !sessionName) {
       return NextResponse.json(
-        { error: 'Band name and session name are required' },
+        { error: 'Band name and session name are required, obtain a session name from your admin' },
         { status: 400 }
       );
     }
