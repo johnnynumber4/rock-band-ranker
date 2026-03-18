@@ -29,16 +29,20 @@ import SortableItem from '@/components/SortableBandList';
 import { VotingSession } from '@/lib/types';
 
 type Round = 'round1' | 'round2' | 'round3' | 'round4' | 'results';
-type View = 'login' | 'admin-login' | 'voting';
+type View = 'login' | 'signup' | 'admin-login' | 'voting';
 
 export default function Home() {
   const [view, setView] = useState<View>('login');
   const [sessionName, setSessionName] = useState('');
-  const [sessionInput, setSessionInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [displayNameInput, setDisplayNameInput] = useState('');
+  const [secretCodeInput, setSecretCodeInput] = useState('');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true); // true while checking cookie on mount
   const [adminAuthenticating, setAdminAuthenticating] = useState(false);
 
   const [currentRound, setCurrentRound] = useState<Round>('round1');
@@ -131,23 +135,60 @@ export default function Home() {
     }
   }, [currentRound, round1Bands, round2MissingBands, round3Votes, allBands, finalRankings]);
 
-  // Check admin status on mount
+  // Check auth status on mount (user auth + admin auth)
   useEffect(() => {
-    const checkAdminStatus = async () => {
+    const checkAuth = async () => {
       try {
-        const response = await fetch('/api/admin/status');
-        const data = await response.json();
-        if (data.isAdmin) {
+        // Check user auth first
+        const authRes = await fetch('/api/auth/status');
+        const authData = await authRes.json();
+
+        if (authData.authenticated) {
+          setSessionName(authData.user.displayName);
+
+          if (authData.user.isAdmin) {
+            setIsAdmin(true);
+            setView('voting');
+            setCurrentRound('round4');
+          } else {
+            // Load existing voting session
+            const sessionRes = await fetch('/api/sessions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionName: authData.user.displayName, action: 'load' }),
+            });
+            const sessionData = await sessionRes.json();
+            if (sessionRes.ok && sessionData.session) {
+              const session: VotingSession = sessionData.session;
+              setCurrentRound(session.currentRound);
+              setRound1Bands(session.round1Bands);
+              setRound2MissingBands(session.round2MissingBands || []);
+              setRound3Votes(session.round3Votes?.map((v: any) => v.bandId) || []);
+              setAllBands(session.allBands);
+              setFinalRankings(session.finalRankings);
+            }
+            setView('voting');
+          }
+          setAuthLoading(false);
+          return;
+        }
+
+        // Check env-var super admin
+        const adminRes = await fetch('/api/admin/status');
+        const adminData = await adminRes.json();
+        if (adminData.isAdmin) {
           setIsAdmin(true);
           setSessionName('Admin');
           setView('voting');
-          setCurrentRound('round4'); // Admin always goes to Round 4
+          setCurrentRound('round4');
         }
       } catch (error) {
-        console.log('No admin session found');
+        console.log('No session found');
+      } finally {
+        setAuthLoading(false);
       }
     };
-    checkAdminStatus();
+    checkAuth();
   }, []);
 
   // Load collaborative rankings and initialize dashboard when admin reaches Round 4
@@ -448,73 +489,116 @@ export default function Home() {
   };
 
 
-  const createSession = async () => {
+  const handleSignup = async () => {
     setError('');
-    if (!sessionInput.trim()) {
-      setError('Please enter a session name');
+
+    if (!emailInput.trim() || !passwordInput || !displayNameInput.trim() || !secretCodeInput.trim()) {
+      setError('All fields are required');
       return;
     }
 
     try {
-      const response = await fetch('/api/sessions', {
+      const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: sessionInput.trim(), action: 'create' }),
+        body: JSON.stringify({
+          email: emailInput.trim(),
+          password: passwordInput,
+          displayName: displayNameInput.trim(),
+          secretCode: secretCodeInput.trim(),
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Failed to create session');
+        setError(data.error || 'Failed to create account');
         return;
       }
 
-      setSessionName(sessionInput.trim());
+      setSessionName(data.user.displayName);
+      setIsAdmin(data.user.isAdmin);
       setView('voting');
+      // Clear form
+      setEmailInput('');
+      setPasswordInput('');
+      setDisplayNameInput('');
+      setSecretCodeInput('');
     } catch (error) {
-      setError('Failed to create session');
+      setError('Failed to create account');
     }
   };
 
-  const loadSession = async () => {
+  const handleLogin = async () => {
     setError('');
-    if (!sessionInput.trim()) {
-      setError('Please enter a session name');
+
+    if (!emailInput.trim() || !passwordInput) {
+      setError('Email and password are required');
       return;
     }
 
     try {
-      const response = await fetch('/api/sessions', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: sessionInput.trim(), action: 'load' }),
+        body: JSON.stringify({
+          email: emailInput.trim(),
+          password: passwordInput,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Session not found');
+        setError(data.error || 'Login failed');
         return;
       }
 
-      const session: VotingSession = data.session;
-      setSessionName(session.sessionName);
-      setCurrentRound(session.currentRound);
-      setRound1Bands(session.round1Bands);
-      setRound2MissingBands(session.round2MissingBands || []);
-      setRound3Votes(session.round3Votes?.map(v => v.bandId) || []);
-      setAllBands(session.allBands);
-      setFinalRankings(session.finalRankings);
-      setView('voting');
+      setSessionName(data.user.displayName);
+      setIsAdmin(data.user.isAdmin);
+
+      if (data.user.isAdmin) {
+        setView('voting');
+        setCurrentRound('round4');
+      } else {
+        // Load voting session
+        const sessionRes = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionName: data.user.displayName, action: 'load' }),
+        });
+        const sessionData = await sessionRes.json();
+        if (sessionRes.ok && sessionData.session) {
+          const session: VotingSession = sessionData.session;
+          setCurrentRound(session.currentRound);
+          setRound1Bands(session.round1Bands);
+          setRound2MissingBands(session.round2MissingBands || []);
+          setRound3Votes(session.round3Votes?.map((v: any) => v.bandId) || []);
+          setAllBands(session.allBands);
+          setFinalRankings(session.finalRankings);
+        }
+        setView('voting');
+      }
+
+      // Clear form
+      setEmailInput('');
+      setPasswordInput('');
     } catch (error) {
-      setError('Failed to load session');
+      setError('Login failed');
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/status', { method: 'DELETE' });
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+
     setView('login');
     setSessionName('');
-    setSessionInput('');
+    setEmailInput('');
+    setPasswordInput('');
     setCurrentRound('round1');
     setIsAdmin(false);
     setRound1Bands([...BILLBOARD_BANDS]);
@@ -791,39 +875,65 @@ export default function Home() {
     return [];
   }, [allBands, currentRound]);
 
+  // Loading state while checking auth cookie on mount
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-spotify-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-2 border-spotify-green rounded-full border-t-transparent mx-auto mb-4"></div>
+          <p className="text-spotify-light-gray text-sm">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Login View
   if (view === 'login') {
     return (
       <div className="min-h-screen bg-spotify-black p-4 sm:p-8 flex items-center justify-center">
         <div className="max-w-md w-full">
-          <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-6 sm:p-8 border border-spotify-gray">
-            {/* Logo/Title */}
-            <div className="text-center mb-8">
-              <div className="inline-block p-4 bg-spotify-green rounded-full mb-4">
-                <svg className="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 24 24">
+          <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 border border-spotify-gray">
+            <div className="text-center mb-6 sm:mb-8">
+              <div className="inline-block p-3 sm:p-4 bg-spotify-green rounded-full mb-3 sm:mb-4">
+                <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z"/>
                 </svg>
               </div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">
+              <h1 className="text-2xl sm:text-4xl font-bold text-white mb-1 sm:mb-2">
                 Rock Band Ranker
               </h1>
-              <p className="text-spotify-light-gray text-sm sm:text-base">
-                Create or load your voting session
+              <p className="text-spotify-light-gray text-xs sm:text-base">
+                Log in to start ranking
               </p>
             </div>
 
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-spotify-light-gray mb-2">
-                Session Name
-              </label>
-              <input
-                type="text"
-                value={sessionInput}
-                onChange={(e) => setSessionInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && createSession()}
-                placeholder="Enter your name or session ID"
-                className="w-full px-4 py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
-              />
+            <div className="space-y-3 sm:space-y-4 mb-5 sm:mb-6">
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  placeholder="you@email.com"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  placeholder="Enter your password"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
             </div>
 
             {error && (
@@ -832,34 +942,129 @@ export default function Home() {
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={createSession}
-                className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-105"
-              >
-                Create New Session
-              </button>
-              <button
-                onClick={loadSession}
-                className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-6 rounded-full transition-all border border-spotify-light-gray/30"
-              >
-                Load Session
-              </button>
+            <button
+              onClick={handleLogin}
+              className="w-full bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
+            >
+              Log In
+            </button>
+
+            <div className="mt-5 sm:mt-6 text-center">
+              <p className="text-spotify-light-gray text-sm">
+                Don't have an account?{' '}
+                <button
+                  onClick={() => { setView('signup'); setError(''); }}
+                  className="text-spotify-green hover:text-spotify-green-dark font-medium underline"
+                >
+                  Sign Up
+                </button>
+              </p>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-spotify-gray">
+            <div className="mt-6 pt-5 border-t border-spotify-gray">
               <button
-                onClick={() => setView('admin-login')}
-                className="w-full text-center text-sm text-spotify-green hover:text-spotify-green-dark transition-colors mb-4 underline"
+                onClick={() => { setView('admin-login'); setError(''); }}
+                className="w-full text-center text-sm text-spotify-light-gray hover:text-white transition-colors"
               >
-                🔒 Admin Login
+                Admin Login
               </button>
-              <a
-                href="/admin"
-                className="block text-center text-sm text-spotify-green hover:text-spotify-green-dark transition-colors"
-              >
-                View Aggregated Results (Admin) →
-              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Sign Up View
+  if (view === 'signup') {
+    return (
+      <div className="min-h-screen bg-spotify-black p-4 sm:p-8 flex items-center justify-center">
+        <div className="max-w-md w-full">
+          <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 border border-spotify-gray">
+            <div className="text-center mb-5 sm:mb-8">
+              <h1 className="text-2xl sm:text-4xl font-bold text-white mb-1 sm:mb-2">
+                Create Account
+              </h1>
+              <p className="text-spotify-light-gray text-xs sm:text-base">
+                Join the ranking
+              </p>
+            </div>
+
+            <div className="space-y-3 sm:space-y-4 mb-5 sm:mb-6">
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={displayNameInput}
+                  onChange={(e) => setDisplayNameInput(e.target.value)}
+                  placeholder="Your public name (e.g. Mike)"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="you@email.com"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="At least 8 characters"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
+                  Secret Code
+                </label>
+                <input
+                  type="text"
+                  value={secretCodeInput}
+                  onChange={(e) => setSecretCodeInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSignup()}
+                  placeholder="Get this from the organizer"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleSignup}
+              className="w-full bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
+            >
+              Create Account
+            </button>
+
+            <div className="mt-5 sm:mt-6 text-center">
+              <p className="text-spotify-light-gray text-sm">
+                Already have an account?{' '}
+                <button
+                  onClick={() => { setView('login'); setError(''); }}
+                  className="text-spotify-green hover:text-spotify-green-dark font-medium underline"
+                >
+                  Log In
+                </button>
+              </p>
             </div>
           </div>
         </div>
@@ -981,24 +1186,19 @@ export default function Home() {
       <div
         ref={setNodeRef}
         style={style}
-        className={`relative flex items-center justify-between rounded-lg p-4 transition-all min-h-[60px] cursor-pointer ${
+        className={`relative flex items-center justify-between rounded-lg p-2.5 sm:p-4 transition-all min-h-[48px] sm:min-h-[60px] cursor-pointer ${
           isDragState || isDragging
-            ? 'bg-spotify-green/40 border-2 border-spotify-green shadow-2xl scale-110 opacity-90'
+            ? 'bg-spotify-green/40 border-2 border-spotify-green shadow-2xl scale-105 opacity-90'
             : isSelected
-            ? 'bg-blue-600/30 border-2 border-blue-500 shadow-lg scale-105'
-            : 'bg-spotify-gray border-2 border-spotify-gray hover:border-spotify-green hover:bg-spotify-gray/80 hover:scale-102'
+            ? 'bg-blue-600/30 border-2 border-blue-500 shadow-lg'
+            : 'bg-spotify-gray border-2 border-spotify-gray hover:border-spotify-green hover:bg-spotify-gray/80'
         }`}
         onClick={() => selectBand(ranking)}
         {...attributes}
         {...listeners}
       >
-        {/* Drag Handle */}
-        <div className="flex items-center gap-4 flex-1 min-w-0">
-          <div className="text-spotify-green flex flex-col items-center">
-            <span className="text-xs">⋮⋮</span>
-            <span className="text-xs">⋮⋮</span>
-          </div>
-          <span className="text-lg font-bold text-spotify-green w-8 text-right flex-shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+          <span className="text-base sm:text-lg font-bold text-spotify-green w-7 sm:w-8 text-right flex-shrink-0">
             {ranking.finalPosition}
           </span>
           <span className="text-sm font-medium text-white truncate">
@@ -1006,35 +1206,18 @@ export default function Home() {
           </span>
         </div>
 
-        <div className="text-xs text-spotify-light-gray flex flex-col items-end">
-          <span className="font-medium">{ranking.totalScore} pts</span>
-          <span className="opacity-75">{ranking.voteCount} votes</span>
-          {(isDragState || isDragging) && (
-            <span className="text-spotify-green font-bold mt-1 text-xs">
-              🎯 Drop in list →
-            </span>
-          )}
+        <div className="text-xs text-spotify-light-gray flex items-center gap-2 sm:gap-3 flex-shrink-0 ml-2">
+          <span className="font-medium hidden sm:inline">{ranking.totalScore} pts</span>
+          <span className="opacity-75 hidden sm:inline">{ranking.voteCount} votes</span>
           {isSelected && !isDragState && !isDragging && (
-            <span className="text-blue-400 font-bold mt-1 text-xs">
-              ✓ Selected - Click position →
-            </span>
-          )}
-          {!isSelected && !isDragState && !isDragging && (
-            <span className="text-xs text-spotify-green/70 mt-1">
-              Min pos: {getValidDropPositions(ranking.bandId)[0] || 1}
+            <span className="text-blue-400 font-bold text-xs">
+              Tap position →
             </span>
           )}
         </div>
 
-        {/* Visual affordance */}
-        {!isDragState && !isDragging && !isSelected && (
-          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 opacity-50">
-            <span className="text-xs text-spotify-green">Click to select</span>
-          </div>
-        )}
-
         {isSelected && !isDragState && !isDragging && (
-          <div className="absolute -top-2 -right-2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
+          <div className="absolute -top-1.5 -right-1.5 bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
             ✓
           </div>
         )}
@@ -1052,7 +1235,7 @@ export default function Home() {
         items={finalTop50.map(band => band.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="space-y-1 max-h-[700px] overflow-y-auto pr-2 border border-white/20 rounded-lg p-4 bg-gray-900/20">
+        <div className="space-y-1 max-h-[50vh] sm:max-h-[700px] overflow-y-auto overscroll-contain pr-1 sm:pr-2 border border-white/20 rounded-lg p-2 sm:p-4 bg-gray-900/20">
           {finalTop50.map((band, index) => {
             const position = index + 1;
 
@@ -1124,57 +1307,26 @@ export default function Home() {
           setDropRef(node);
         }}
         style={style}
-        className={`relative flex items-center justify-between rounded-lg p-3 transition-all min-h-[56px] cursor-move ${
+        className={`relative flex items-center justify-between rounded-lg p-2 sm:p-3 transition-all min-h-[40px] sm:min-h-[48px] cursor-move ${
           isDragging
             ? 'bg-spotify-green/40 border-2 border-spotify-green shadow-2xl scale-105 opacity-90'
             : isOver
-            ? 'bg-spotify-green/30 border-2 border-spotify-green shadow-xl scale-102 ring-2 ring-spotify-green/50'
-            : 'bg-spotify-green/10 border-2 border-spotify-green/50 hover:bg-spotify-green/20 hover:border-spotify-green'
+            ? 'bg-spotify-green/30 border-2 border-spotify-green shadow-xl ring-2 ring-spotify-green/50'
+            : 'bg-spotify-green/10 border-2 border-spotify-green/50'
         }`}
         {...attributes}
         {...listeners}
       >
-        {/* Enhanced Drop Zone Indicator */}
-        {isOver && (
-          <div className="absolute inset-0 bg-spotify-green/20 border-2 border-dashed border-spotify-green rounded-lg animate-pulse">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="bg-spotify-green text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-                🎯 DROP HERE
-              </span>
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 flex-1 min-w-0 relative">
-          <div className="text-spotify-green flex flex-col items-center opacity-60">
-            <span className="text-xs">⋮⋮</span>
-            <span className="text-xs">⋮⋮</span>
-          </div>
-          <span className="text-sm font-bold w-8 text-right flex-shrink-0 text-spotify-green">
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+          <span className="text-xs sm:text-sm font-bold w-6 sm:w-8 text-right flex-shrink-0 text-spotify-green">
             {position}
           </span>
-          <span className="text-sm font-medium text-white truncate">
-            {isOver && draggedBand && draggedBand.source === 'picklist' ? (
-              <span className="text-spotify-green font-bold">
-                → {draggedBand.bandName}
-              </span>
-            ) : (
-              <>
-                {band.name}
-                <span className="ml-2 text-xs bg-spotify-green text-white px-2 py-1 rounded-full">
-                  NEW
-                </span>
-              </>
-            )}
+          <span className="text-xs sm:text-sm font-medium text-white truncate">
+            {band.name}
           </span>
-        </div>
-
-        <div className="flex items-center gap-2 relative">
-          {!isDragging && !isOver && (
-            <span className="text-xs text-spotify-green opacity-75">
-              🔄 Drag to reorder
-            </span>
-          )}
+          <span className="text-[10px] sm:text-xs bg-spotify-green text-white px-1.5 py-0.5 rounded-full flex-shrink-0">
+            NEW
+          </span>
         </div>
       </div>
     );
@@ -1198,119 +1350,51 @@ export default function Home() {
       <div
         ref={setNodeRef}
         onClick={() => hasSelectedBand && isValidSelect ? insertSelectedBandAtPosition(position) : undefined}
-        className={`relative flex items-center justify-between rounded-lg p-3 transition-all min-h-[56px] ${
+        className={`relative flex items-center justify-between rounded-lg p-2 sm:p-3 transition-all min-h-[40px] sm:min-h-[48px] ${
           hasSelectedBand && isValidSelect ? 'cursor-pointer' : ''
         } ${
           isOver && isValidDrop
-            ? 'bg-spotify-green/30 border-2 border-spotify-green shadow-xl scale-102 ring-2 ring-spotify-green/50'
+            ? 'bg-spotify-green/30 border-2 border-spotify-green shadow-xl ring-2 ring-spotify-green/50'
             : isOver && !isValidDrop
-            ? 'bg-red-900/30 border-2 border-red-600 shadow-xl scale-102 ring-2 ring-red-600/50'
+            ? 'bg-red-900/30 border-2 border-red-600 shadow-xl ring-2 ring-red-600/50'
             : hasSelectedBand && isValidSelect
-            ? 'bg-blue-600/20 border-2 border-blue-500 hover:bg-blue-600/30 shadow-lg'
+            ? 'bg-blue-600/20 border-2 border-blue-500 hover:bg-blue-600/30'
             : hasSelectedBand && !isValidSelect
             ? 'bg-red-900/10 border-2 border-red-600/30 opacity-50'
             : isDraggingFromPicklist && !isValidDrop
             ? 'bg-red-900/10 border-2 border-red-600/30 opacity-50'
             : isDraggingFromPicklist && isValidDrop
-            ? 'bg-spotify-green/10 border-2 border-spotify-green/50 hover:bg-spotify-green/20'
+            ? 'bg-spotify-green/10 border-2 border-spotify-green/50'
             : band
-            ? 'bg-spotify-gray/50 border-2 border-spotify-gray hover:border-white/30 hover:bg-spotify-gray/70'
-            : 'bg-dashed border-2 border-dashed border-spotify-light-gray/30 hover:border-spotify-light-gray/50'
+            ? 'bg-spotify-gray/50 border-2 border-spotify-gray'
+            : 'bg-dashed border-2 border-dashed border-spotify-light-gray/30'
         }`}
       >
-        {/* Enhanced Drop Zone Indicator for Drag */}
-        {isOver && (
-          <div className={`absolute inset-0 border-2 border-dashed rounded-lg animate-pulse ${
-            isValidDrop
-              ? 'bg-spotify-green/20 border-spotify-green'
-              : 'bg-red-900/20 border-red-600'
-          }`}>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg ${
-                isValidDrop
-                  ? 'bg-spotify-green text-white'
-                  : 'bg-red-600 text-white'
-              }`}>
-                {isValidDrop ? '🎯 INSERT HERE' : '❌ INVALID POSITION'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Selection Drop Zone Indicator */}
-        {!isOver && hasSelectedBand && isValidSelect && (
-          <div className="absolute inset-0 bg-blue-600/10 border-2 border-dashed border-blue-500 rounded-lg">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs font-bold">
-                👆 CLICK TO INSERT
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Position constraint indicators */}
-        {isDraggingFromPicklist && !isOver && (
-          <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-            isValidDrop
-              ? 'bg-spotify-green text-white'
-              : 'bg-red-600 text-white'
-          }`}>
-            {isValidDrop ? '✓' : '✗'}
-          </div>
-        )}
-
-        {hasSelectedBand && !isOver && (
-          <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-            isValidSelect
-              ? 'bg-blue-600 text-white'
-              : 'bg-red-600 text-white'
-          }`}>
-            {isValidSelect ? '👆' : '✗'}
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <span className={`text-sm font-bold w-8 text-right flex-shrink-0 ${
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+          <span className={`text-xs sm:text-sm font-bold w-6 sm:w-8 text-right flex-shrink-0 ${
             isOver && isValidDrop ? 'text-spotify-green'
             : isOver && !isValidDrop ? 'text-red-400'
+            : hasSelectedBand && isValidSelect ? 'text-blue-400'
             : band ? 'text-spotify-light-gray'
             : 'text-spotify-light-gray/50'
           }`}>
             {position}
           </span>
-          <span className="text-sm font-medium text-white truncate">
+          <span className="text-xs sm:text-sm font-medium text-white truncate">
             {isOver && draggedBand ? (
               <span className={`font-bold ${isValidDrop ? 'text-spotify-green' : 'text-red-400'}`}>
                 → {draggedBand.bandName || draggedBand.name}
               </span>
+            ) : hasSelectedBand && isValidSelect ? (
+              <span className="text-blue-400 font-medium">
+                {band ? band.name : 'Empty'} — tap to insert here
+              </span>
             ) : band ? (
               band.name
             ) : (
-              <span className="text-spotify-light-gray/70 italic">Empty slot</span>
+              <span className="text-spotify-light-gray/70 italic">Empty</span>
             )}
           </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {band && !band.isNewAddition && (
-            <span className="text-xs text-spotify-light-gray bg-spotify-gray/30 px-2 py-1 rounded-full">
-              🔒 Collaborative
-            </span>
-          )}
-          {!band && !isOver && !isDraggingFromPicklist && (
-            <span className="text-xs text-spotify-light-gray/50">
-              Available position
-            </span>
-          )}
-          {!band && !isOver && isDraggingFromPicklist && (
-            <span className={`text-xs px-2 py-1 rounded-full ${
-              isValidDrop
-                ? 'text-spotify-green bg-spotify-green/10'
-                : 'text-red-400 bg-red-900/10'
-            }`}>
-              {isValidDrop ? 'Valid drop' : 'Invalid'}
-            </span>
-          )}
         </div>
       </div>
     );
@@ -1318,29 +1402,26 @@ export default function Home() {
 
   // Voting View
   return (
-    <div className="min-h-screen bg-spotify-black p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-spotify-black p-2 sm:p-6 lg:p-8 pb-16 sm:pb-8">
       <div className="max-w-6xl mx-auto">
-        <header className="mb-6 sm:mb-8">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
-            <div className="hidden sm:block sm:flex-1"></div>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white text-center">
+        <header className="mb-4 sm:mb-8">
+          <div className="flex justify-between items-center gap-2 mb-2 sm:mb-4">
+            <h1 className="text-xl sm:text-4xl lg:text-5xl font-bold text-white truncate">
               Rock Band Ranker
             </h1>
-            <div className="sm:flex-1 flex justify-end w-full sm:w-auto">
-              <button
-                onClick={isAdmin ? adminLogout : logout}
-                className="text-sm bg-spotify-gray hover:bg-spotify-gray/80 text-spotify-light-gray hover:text-white px-4 py-2 rounded-full transition-all border border-spotify-light-gray/20"
-              >
-                {isAdmin ? 'Admin Logout' : 'Logout'}
-              </button>
-            </div>
+            <button
+              onClick={isAdmin ? adminLogout : logout}
+              className="text-xs sm:text-sm bg-spotify-gray hover:bg-spotify-gray/80 text-spotify-light-gray hover:text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-full transition-all border border-spotify-light-gray/20 flex-shrink-0"
+            >
+              {isAdmin ? 'Admin Logout' : 'Logout'}
+            </button>
           </div>
-          <div className="text-center">
-            <p className="text-base sm:text-lg text-spotify-light-gray">
+          <div className="flex items-center justify-between">
+            <p className="text-sm sm:text-lg text-spotify-light-gray">
               Session: <span className="font-bold text-spotify-green">{sessionName}</span>
             </p>
             {saving && (
-              <p className="text-sm text-spotify-green mt-2 flex items-center justify-center gap-2">
+              <p className="text-xs sm:text-sm text-spotify-green flex items-center gap-1">
                 <span className="inline-block w-2 h-2 bg-spotify-green rounded-full animate-pulse"></span>
                 Saving...
               </p>
@@ -1351,12 +1432,12 @@ export default function Home() {
         {/* Round 1: Rerank Billboard's 50 */}
         {currentRound === 'round1' && !isAdmin && (
           <div>
-            <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 mb-6 border border-spotify-gray">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+            <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
+              <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
                 Round 1: Rerank Billboard's Top 50
               </h2>
-              <p className="text-spotify-light-gray mb-6 text-sm sm:text-base">
-                Drag and drop to reorder the bands. Top 10 positions are worth significantly more points.
+              <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
+                Drag the handle to reorder bands. Top 10 positions are worth significantly more points.
               </p>
 
               <DndContext
@@ -1368,7 +1449,7 @@ export default function Home() {
                   items={round1Bands.map(b => b.id)}
                   strategy={verticalListSortingStrategy}
                 >
-                  <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
+                  <div className="space-y-1 sm:space-y-2 max-h-[60vh] sm:max-h-[600px] overflow-y-auto overscroll-contain pr-1 sm:pr-2">
                     {round1Scored.map((band) => (
                       <SortableItem
                         key={band.id}
@@ -1384,7 +1465,7 @@ export default function Home() {
 
               <button
                 onClick={finishRound1}
-                className="mt-6 w-full bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02]"
+                className="mt-4 sm:mt-6 w-full bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02]"
               >
                 Continue to Round 2 →
               </button>
@@ -1395,18 +1476,18 @@ export default function Home() {
         {/* Round 2: Add Missing Bands */}
         {currentRound === 'round2' && !isAdmin && (
           <div>
-            <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 mb-6 border border-spotify-gray">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+            <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
+              <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
                 Round 2: Add Missing Bands
               </h2>
-              <p className="text-spotify-light-gray mb-6 text-sm sm:text-base">
+              <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
                 Add bands you think are missing from the Billboard top 50. We'll vote on their rankings in Round 3.
               </p>
 
               {/* Sticky Search Box */}
-              <div className="mb-6 sticky top-0 bg-spotify-dark-gray z-10 pb-4 -mt-4 pt-4">
+              <div className="mb-4 sm:mb-6 sticky top-0 bg-spotify-dark-gray z-10 pb-3 sm:pb-4 -mt-3 sm:-mt-4 pt-3 sm:pt-4">
                 <div className="relative">
-                  <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex gap-2">
                     <div className="flex-1 relative">
                       <input
                         type="text"
@@ -1417,18 +1498,18 @@ export default function Home() {
                             addNewBand();
                           }
                         }}
-                        placeholder="Search for a band or artist..."
-                        className="w-full px-4 py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
+                        placeholder="Search for a band..."
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
                       />
                       {searching && (
-                        <div className="absolute right-3 top-3">
+                        <div className="absolute right-3 top-2.5 sm:top-3">
                           <div className="animate-spin h-5 w-5 border-2 border-spotify-green rounded-full border-t-transparent"></div>
                         </div>
                       )}
 
                       {/* Search Suggestions Dropdown */}
                       {showSuggestions && searchResults.length > 0 && (
-                        <div className="absolute top-full mt-1 w-full bg-spotify-gray border border-spotify-green rounded-lg shadow-2xl max-h-80 overflow-y-auto z-20">
+                        <div className="absolute top-full mt-1 w-full bg-spotify-gray border border-spotify-green rounded-lg shadow-2xl max-h-60 sm:max-h-80 overflow-y-auto z-20">
                           {searchResults.map((artist) => {
                             const duplicate = isDuplicate(artist.name);
                             return (
@@ -1436,19 +1517,19 @@ export default function Home() {
                                 key={artist.id}
                                 onClick={() => !duplicate && addBandFromSearch(artist)}
                                 disabled={duplicate}
-                                className={`w-full text-left px-4 py-3 hover:bg-spotify-green/20 border-b border-spotify-dark-gray last:border-b-0 transition-colors ${
+                                className={`w-full text-left px-3 sm:px-4 py-2.5 sm:py-3 hover:bg-spotify-green/20 border-b border-spotify-dark-gray last:border-b-0 transition-colors ${
                                   duplicate ? 'opacity-50 cursor-not-allowed' : ''
                                 }`}
                               >
-                                <div className="font-medium text-white">
+                                <div className="font-medium text-white text-sm sm:text-base">
                                   {artist.name}
                                   {duplicate && (
-                                    <span className="ml-2 text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded-full border border-red-700">
-                                      Already added
+                                    <span className="ml-2 text-xs bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded-full border border-red-700">
+                                      Added
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-sm text-spotify-light-gray">
+                                <div className="text-xs sm:text-sm text-spotify-light-gray">
                                   {artist.type && `${artist.type}`}
                                   {artist.country && ` • ${artist.country}`}
                                   {artist.disambiguation && ` • ${artist.disambiguation}`}
@@ -1461,30 +1542,30 @@ export default function Home() {
                     </div>
                     <button
                       onClick={addNewBand}
-                      className="bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-105 whitespace-nowrap"
+                      className="bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-105 whitespace-nowrap text-sm sm:text-base"
                     >
-                      Add Custom
+                      Add
                     </button>
                   </div>
-                  <p className="text-xs text-spotify-light-gray mt-2">
-                    Type to search MusicBrainz database or click "Add Custom" to add any band name
+                  <p className="text-xs text-spotify-light-gray mt-1.5 sm:mt-2 hidden sm:block">
+                    Type to search MusicBrainz database or click "Add" to add any band name
                   </p>
                 </div>
               </div>
 
               {round2MissingBands.length > 0 && (
                 <>
-                  <h3 className="text-lg sm:text-xl font-bold text-white mb-4">
-                    Your Submitted Missing Bands ({round2MissingBands.length})
+                  <h3 className="text-base sm:text-xl font-bold text-white mb-3 sm:mb-4">
+                    Your Submitted Bands ({round2MissingBands.length})
                   </h3>
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                  <div className="space-y-1 sm:space-y-2 max-h-[40vh] sm:max-h-[400px] overflow-y-auto overscroll-contain pr-1 sm:pr-2">
                     {round2MissingBands.map((bandName, index) => (
                       <div
                         key={index}
-                        className="flex items-center justify-between bg-spotify-gray border-2 border-spotify-gray rounded-lg p-4 sm:p-4 mb-2"
+                        className="flex items-center bg-spotify-gray border-2 border-spotify-gray rounded-lg p-2.5 sm:p-4"
                       >
-                        <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                          <span className="text-lg sm:text-2xl font-bold text-spotify-green w-8 sm:w-12 text-right flex-shrink-0">
+                        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                          <span className="text-base sm:text-2xl font-bold text-spotify-green w-7 sm:w-12 text-right flex-shrink-0">
                             {index + 1}
                           </span>
                           <span className="text-sm sm:text-lg font-medium text-white truncate">
@@ -1497,18 +1578,18 @@ export default function Home() {
                 </>
               )}
 
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <div className="mt-4 sm:mt-6 flex gap-3">
                 <button
                   onClick={goBack}
-                  className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-6 rounded-full transition-all border border-spotify-light-gray/30"
+                  className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all border border-spotify-light-gray/30 text-sm sm:text-base"
                 >
-                  ← Back to Round 1
+                  ← Back
                 </button>
                 <button
                   onClick={finishRound2}
-                  className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02]"
+                  className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
                 >
-                  Continue to Round 3 →
+                  Round 3 →
                 </button>
               </div>
             </div>
@@ -1518,30 +1599,29 @@ export default function Home() {
         {/* Round 3: Rank All User-Added Bands */}
         {currentRound === 'round3' && !isAdmin && (
           <div>
-            <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 mb-6 border border-spotify-gray">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-                Round 3: Vote on Missing Bands Rankings
+            <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
+              <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
+                Round 3: Vote on Missing Bands
               </h2>
-              <p className="text-spotify-light-gray mb-6 text-sm sm:text-base">
-                Here are all the missing bands submitted by everyone ({round3MissingBands.length} total).
-                Drag to rank them based on your preference. Your votes will be combined with others to create the final rankings.
+              <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
+                {round3MissingBands.length} bands submitted by everyone. Drag the handle to rank them. Your votes combine with others.
               </p>
 
               {round3MissingBands.length === 0 ? (
-                <div className="text-center py-8 text-spotify-light-gray">
-                  <p className="mb-4">No bands have been added by any users yet.</p>
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <div className="text-center py-6 sm:py-8 text-spotify-light-gray">
+                  <p className="mb-4 text-sm sm:text-base">No bands have been added by any users yet.</p>
+                  <div className="flex gap-3 justify-center">
                     <button
                       onClick={goBack}
-                      className="bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-6 rounded-full transition-all border border-spotify-light-gray/30"
+                      className="bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all border border-spotify-light-gray/30 text-sm sm:text-base"
                     >
-                      ← Back to Round 2
+                      ← Back
                     </button>
                     <button
                       onClick={finishRound3}
-                      className="bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02]"
+                      className="bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
                     >
-                      Continue to Round 4 →
+                      Continue →
                     </button>
                   </div>
                 </div>
@@ -1556,7 +1636,7 @@ export default function Home() {
                       items={round3MissingBands.map(b => b.id)}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
+                      <div className="space-y-1 sm:space-y-2 max-h-[60vh] sm:max-h-[600px] overflow-y-auto overscroll-contain pr-1 sm:pr-2">
                         {round3Scored.map((band) => (
                           <SortableItem
                             key={band.id}
@@ -1570,18 +1650,18 @@ export default function Home() {
                     </SortableContext>
                   </DndContext>
 
-                  <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                  <div className="mt-4 sm:mt-6 flex gap-3">
                     <button
                       onClick={goBack}
-                      className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-6 rounded-full transition-all border border-spotify-light-gray/30"
+                      className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all border border-spotify-light-gray/30 text-sm sm:text-base"
                     >
-                      ← Back to Round 2
+                      ← Back
                     </button>
                     <button
                       onClick={finishRound3}
-                      className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-6 rounded-full transition-all transform hover:scale-[1.02]"
+                      className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
                     >
-                      Continue to Round 4 →
+                      Submit Votes →
                     </button>
                   </div>
                 </>
@@ -1600,19 +1680,19 @@ export default function Home() {
                 onDragStart={handleDragStart}
                 onDragCancel={handleDragCancel}
               >
-                <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 mb-6 border border-spotify-gray">
-                  <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-                    🏆 Final Rankings Dashboard
+                <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
+                  <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
+                    Final Rankings Dashboard
                   </h2>
-                  <p className="text-spotify-light-gray mb-6 text-sm sm:text-base">
-                    🎯 Drag bands from the picklist to insert them into the final top 50. Inserted bands push others down.
+                  <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
+                    Select a band from the picklist, then tap a position to insert it. Inserted bands push others down.
                   </p>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8">
                     {/* Left Column: Picklist (40% width) */}
                     <div className="lg:col-span-5">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-bold text-spotify-green">📋 Missing Bands Picklist</h3>
+                      <div className="flex justify-between items-center mb-3 sm:mb-4">
+                        <h3 className="text-base sm:text-xl font-bold text-spotify-green">Picklist</h3>
                         <button
                           onClick={resetDashboard}
                           className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2 px-3 rounded-lg transition-all transform hover:scale-105 border border-red-500"
@@ -1624,7 +1704,7 @@ export default function Home() {
                       <p className="text-xs text-spotify-light-gray mb-3">
                         Inserted: {originalCollaborativeRankings.length - collaborativeRankings.length} / {originalCollaborativeRankings.length} bands
                       </p>
-                      <div className="space-y-2 max-h-[700px] overflow-y-auto pr-2 border border-spotify-green rounded-lg p-4 bg-spotify-green/5">
+                      <div className="space-y-1 sm:space-y-2 max-h-[40vh] sm:max-h-[700px] overflow-y-auto overscroll-contain pr-1 sm:pr-2 border border-spotify-green rounded-lg p-2 sm:p-4 bg-spotify-green/5">
                         {loadingCollaborative ? (
                           <div className="text-center text-spotify-light-gray py-8">
                             <div className="animate-spin h-8 w-8 border-2 border-spotify-green rounded-full border-t-transparent mx-auto mb-4"></div>
@@ -1743,15 +1823,15 @@ export default function Home() {
         {/* Results */}
         {currentRound === 'results' && (
           <div>
-            <div className="bg-spotify-dark-gray rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 mb-6 border border-spotify-gray">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+            <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
+              <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
                 Your Final Rankings
               </h2>
-              <p className="text-spotify-light-gray mb-6 text-sm sm:text-base">
+              <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
                 Your rankings have been saved! Visit the admin page to see aggregated results from all voters.
               </p>
 
-              <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
+              <div className="space-y-1 sm:space-y-2 max-h-[60vh] sm:max-h-[600px] overflow-y-auto overscroll-contain pr-1 sm:pr-2">
                 {finalRankings.map((band, index) => {
                   const originalBand = allBands.find(b => b.id === band.id);
                   const isTopTen = index < 10;
@@ -1815,12 +1895,13 @@ export default function Home() {
 
         {/* Progress Indicator - Hidden for Admin Users */}
         {!isAdmin && (
-          <div className="flex justify-center gap-2 mt-8">
-            <div className={`w-3 h-3 rounded-full transition-all ${currentRound === 'round1' ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
-            <div className={`w-3 h-3 rounded-full transition-all ${currentRound === 'round2' ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
-            <div className={`w-3 h-3 rounded-full transition-all ${currentRound === 'round3' ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
-            <div className={`w-3 h-3 rounded-full transition-all ${currentRound === 'round4' ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
-            <div className={`w-3 h-3 rounded-full transition-all ${currentRound === 'results' ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
+          <div className="fixed bottom-0 left-0 right-0 sm:relative sm:bottom-auto flex justify-center gap-2 py-3 sm:py-0 sm:mt-8 bg-spotify-black/90 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none border-t border-spotify-gray/30 sm:border-0 z-30">
+            {(['round1', 'round2', 'round3', 'round4', 'results'] as const).map((round, i) => (
+              <div key={round} className="flex items-center gap-1">
+                <div className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full transition-all ${currentRound === round ? 'bg-spotify-green scale-125' : 'bg-spotify-gray'}`} />
+                {i < 4 && <div className={`w-3 sm:w-4 h-0.5 ${currentRound === round || ((['round1', 'round2', 'round3', 'round4', 'results'] as const).indexOf(currentRound) > i) ? 'bg-spotify-green/50' : 'bg-spotify-gray/50'}`} />}
+              </div>
+            ))}
           </div>
         )}
       </div>

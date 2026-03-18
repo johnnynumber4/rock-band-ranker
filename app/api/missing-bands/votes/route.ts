@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/mongodb';
 import { MissingBandVote, CollaborativeRanking } from '@/lib/types';
 import { calculateScore } from '@/lib/scoring';
+import { getAuthFromRequest } from '@/lib/auth';
 
 // GET - Get collaborative rankings for missing bands
 export async function GET() {
@@ -73,6 +74,11 @@ export async function GET() {
 // POST - Submit user's votes for missing bands (Round 3)
 export async function POST(request: NextRequest) {
   try {
+    const auth = await getAuthFromRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const { sessionName, votes } = await request.json();
 
     if (!sessionName || !Array.isArray(votes)) {

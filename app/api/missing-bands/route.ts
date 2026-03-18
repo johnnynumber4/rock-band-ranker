@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/mongodb';
 import { MissingBand } from '@/lib/types';
 import { v4 as uuidv4 } from 'uuid';
+import { getAuthFromRequest } from '@/lib/auth';
 
 // GET - Fetch all missing bands for Round 3 voting
 export async function GET() {
@@ -34,6 +35,11 @@ export async function GET() {
 // POST - Add a new missing band (Round 2)
 export async function POST(request: NextRequest) {
   try {
+    const auth = await getAuthFromRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const { name, sessionName } = await request.json();
 
     if (!name || !sessionName) {
