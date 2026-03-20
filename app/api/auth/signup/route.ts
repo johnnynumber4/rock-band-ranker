@@ -16,17 +16,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate secret code
-    const expectedSecret = process.env.SIGNUP_SECRET;
-    if (!expectedSecret) {
+    // Validate invite code against database
+    const db = await getDatabase();
+    const normalizedCode = secretCode.trim().toUpperCase();
+    const inviteCodesCollection = db.collection('invite_codes');
+    const inviteCode = await inviteCodesCollection.findOne({
+      code: normalizedCode,
+      usedBy: null,
+    });
+    if (!inviteCode) {
       return NextResponse.json(
-        { error: 'Sign-up is not configured' },
-        { status: 500 }
-      );
-    }
-    if (secretCode !== expectedSecret) {
-      return NextResponse.json(
-        { error: 'Invalid secret code. Ask the organizer for the code.' },
+        { error: 'Invalid or already used invite code. Ask the organizer for a code.' },
         { status: 403 }
       );
     }
@@ -57,7 +57,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const db = await getDatabase();
     const users = db.collection<User>('users');
 
     // Ensure unique indexes
@@ -118,6 +117,12 @@ export async function POST(request: NextRequest) {
       completed: false,
     };
     await sessions.insertOne(newSession as any);
+
+    // Mark invite code as used
+    await inviteCodesCollection.updateOne(
+      { code: normalizedCode },
+      { $set: { usedBy: trimmedName, usedAt: now } }
+    );
 
     // Create auth session and set cookie
     const token = await createAuthSession(user);

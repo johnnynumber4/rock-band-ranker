@@ -44,6 +44,11 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [authLoading, setAuthLoading] = useState(true); // true while checking cookie on mount
   const [adminAuthenticating, setAdminAuthenticating] = useState(false);
+  const [showInviteCodes, setShowInviteCodes] = useState(false);
+  const [inviteCodes, setInviteCodes] = useState<any[]>([]);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteCount, setInviteCount] = useState(1);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const [currentRound, setCurrentRound] = useState<Round>('round1');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -68,6 +73,7 @@ export default function Home() {
   const [originalBillboardTop50, setOriginalBillboardTop50] = useState<Band[]>([]);
   const [insertedBandsPositions, setInsertedBandsPositions] = useState<Map<string, number>>(new Map());
   const [selectedBand, setSelectedBand] = useState<any>(null);
+  const [showSoloArtistBanner, setShowSoloArtistBanner] = useState(true);
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -160,7 +166,9 @@ export default function Home() {
             const sessionData = await sessionRes.json();
             if (sessionRes.ok && sessionData.session) {
               const session: VotingSession = sessionData.session;
-              setCurrentRound(session.currentRound);
+              // Non-admin users should never be on round4; send them to results instead
+              const round = session.currentRound === 'round4' ? 'results' : session.currentRound;
+              setCurrentRound(round);
               setRound1Bands(session.round1Bands);
               setRound2MissingBands(session.round2MissingBands || []);
               setRound3Votes(session.round3Votes?.map((v: any) => v.bandId) || []);
@@ -570,7 +578,9 @@ export default function Home() {
         const sessionData = await sessionRes.json();
         if (sessionRes.ok && sessionData.session) {
           const session: VotingSession = sessionData.session;
-          setCurrentRound(session.currentRound);
+          // Non-admin users should never be on round4; send them to results instead
+          const round = session.currentRound === 'round4' ? 'results' : session.currentRound;
+          setCurrentRound(round);
           setRound1Bands(session.round1Bands);
           setRound2MissingBands(session.round2MissingBands || []);
           setRound3Votes(session.round3Votes?.map((v: any) => v.bandId) || []);
@@ -625,7 +635,7 @@ export default function Home() {
     if (currentRound === 'round2') setCurrentRound('round1');
     else if (currentRound === 'round3') setCurrentRound('round2');
     else if (currentRound === 'round4') setCurrentRound('round3');
-    else if (currentRound === 'results') setCurrentRound('round4');
+    else if (currentRound === 'results') setCurrentRound(isAdmin ? 'round4' : 'round3');
   };
 
   const finishRound1 = () => {
@@ -1439,6 +1449,27 @@ export default function Home() {
               <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
                 Drag the handle to reorder bands. Top 10 positions are worth significantly more points.
               </p>
+
+              {showSoloArtistBanner && (
+                <div className="mb-3 sm:mb-6 bg-yellow-900/30 border border-yellow-600/50 rounded-lg p-3 sm:p-4 relative">
+                  <button
+                    onClick={() => setShowSoloArtistBanner(false)}
+                    className="absolute top-2 right-2 text-yellow-500/70 hover:text-yellow-400 text-lg leading-none p-1"
+                    aria-label="Dismiss"
+                  >
+                    ×
+                  </button>
+                  <h3 className="text-sm sm:text-base font-bold text-yellow-400 mb-1 sm:mb-2 pr-6">
+                    A note on solo artists
+                  </h3>
+                  <p className="text-xs sm:text-sm text-yellow-200/80 leading-relaxed">
+                    The original Billboard Top 50 Greatest Rock Bands list did not include solo artists.
+                    There is great debate around whether solo artists should be included and what even
+                    constitutes a "solo artist" — is Jimi Hendrix a solo artist or is The Jimi Hendrix
+                    Experience a band? You can add any missing artists (solo or otherwise) in Round 2.
+                  </p>
+                </div>
+              )}
 
               <DndContext
                 sensors={sensors}
