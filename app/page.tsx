@@ -496,6 +496,57 @@ export default function Home() {
     }
   };
 
+  const fetchInviteCodes = async () => {
+    setInviteLoading(true);
+    try {
+      const res = await fetch('/api/admin/invite-codes');
+      const data = await res.json();
+      if (res.ok) setInviteCodes(data.codes);
+    } catch (error) {
+      console.error('Failed to fetch invite codes:', error);
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const generateInviteCodes = async () => {
+    setInviteLoading(true);
+    try {
+      const res = await fetch('/api/admin/invite-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: inviteCount }),
+      });
+      if (res.ok) {
+        await fetchInviteCodes();
+      }
+    } catch (error) {
+      console.error('Failed to generate invite codes:', error);
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const deleteInviteCode = async (code: string) => {
+    try {
+      const res = await fetch('/api/admin/invite-codes', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      if (res.ok) {
+        setInviteCodes(prev => prev.filter(c => c.code !== code));
+      }
+    } catch (error) {
+      console.error('Failed to delete invite code:', error);
+    }
+  };
+
+  const copyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   const handleSignup = async () => {
     setError('');
@@ -1039,14 +1090,14 @@ export default function Home() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-spotify-light-gray mb-1.5">
-                  Secret Code
+                  Invite Code
                 </label>
                 <input
                   type="text"
                   value={secretCodeInput}
-                  onChange={(e) => setSecretCodeInput(e.target.value)}
+                  onChange={(e) => setSecretCodeInput(e.target.value.toUpperCase())}
                   onKeyDown={(e) => e.key === 'Enter' && handleSignup()}
-                  placeholder="Get this from the organizer"
+                  placeholder="6-character code from the organizer"
                   className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-spotify-gray border border-spotify-gray rounded-lg text-white text-sm sm:text-base placeholder-spotify-light-gray focus:ring-2 focus:ring-spotify-green focus:border-transparent transition-all"
                 />
               </div>
@@ -1711,6 +1762,102 @@ export default function Home() {
                 onDragStart={handleDragStart}
                 onDragCancel={handleDragCancel}
               >
+                {/* Invite Codes Panel */}
+                <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl mb-4 sm:mb-6 border border-spotify-gray overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setShowInviteCodes(!showInviteCodes);
+                      if (!showInviteCodes && inviteCodes.length === 0) fetchInviteCodes();
+                    }}
+                    className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-spotify-gray/30 transition-colors"
+                  >
+                    <span className="text-sm sm:text-base font-bold text-spotify-green flex items-center gap-2">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM15.1 8H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                      </svg>
+                      Invite Codes
+                    </span>
+                    <svg className={`w-4 h-4 text-spotify-light-gray transition-transform ${showInviteCodes ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/>
+                    </svg>
+                  </button>
+                  {showInviteCodes && (
+                    <div className="px-3 sm:px-4 pb-3 sm:pb-4 border-t border-spotify-gray">
+                      {/* Generate controls */}
+                      <div className="flex items-center gap-2 mt-3 mb-3">
+                        <label className="text-xs text-spotify-light-gray">Generate</label>
+                        <select
+                          value={inviteCount}
+                          onChange={(e) => setInviteCount(parseInt(e.target.value))}
+                          className="bg-spotify-gray text-white text-sm rounded px-2 py-1 border border-spotify-gray"
+                        >
+                          {[1, 2, 3, 5, 10].map(n => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={generateInviteCodes}
+                          disabled={inviteLoading}
+                          className="bg-spotify-green hover:bg-spotify-green-dark disabled:opacity-50 text-white text-sm font-bold px-3 py-1 rounded-full transition-all"
+                        >
+                          {inviteLoading ? '...' : 'Generate'}
+                        </button>
+                      </div>
+
+                      {/* Codes list */}
+                      {inviteLoading && inviteCodes.length === 0 ? (
+                        <div className="text-center text-spotify-light-gray text-sm py-4">Loading...</div>
+                      ) : inviteCodes.length === 0 ? (
+                        <div className="text-center text-spotify-light-gray text-sm py-4">No invite codes yet. Generate some above.</div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
+                          {inviteCodes.map((ic) => (
+                            <div
+                              key={ic.code}
+                              className={`flex items-center justify-between rounded-lg p-2 text-sm ${
+                                ic.usedBy
+                                  ? 'bg-spotify-gray/30 border border-spotify-gray/50'
+                                  : 'bg-spotify-green/10 border border-spotify-green/30'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <code className={`font-mono font-bold tracking-wider ${ic.usedBy ? 'text-spotify-light-gray line-through' : 'text-spotify-green'}`}>
+                                  {ic.code}
+                                </code>
+                                {ic.usedBy && (
+                                  <span className="text-xs text-spotify-light-gray truncate">
+                                    used by {ic.usedBy}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                {!ic.usedBy && (
+                                  <>
+                                    <button
+                                      onClick={() => copyCode(ic.code)}
+                                      className="text-xs px-2 py-0.5 rounded bg-spotify-gray hover:bg-spotify-gray/80 text-white transition-colors"
+                                      title="Copy code"
+                                    >
+                                      {copiedCode === ic.code ? 'Copied!' : 'Copy'}
+                                    </button>
+                                    <button
+                                      onClick={() => deleteInviteCode(ic.code)}
+                                      className="text-xs px-2 py-0.5 rounded bg-red-900/50 hover:bg-red-800 text-red-400 transition-colors"
+                                      title="Revoke code"
+                                    >
+                                      Revoke
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
                   <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
                     Final Rankings Dashboard
