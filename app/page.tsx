@@ -1538,7 +1538,7 @@ export default function Home() {
                         id={band.id}
                         name={band.name}
                         position={band.position}
-                        score={band.score}
+                        score={isAdmin ? band.score : undefined}
                       />
                     ))}
                   </div>
@@ -1725,7 +1725,7 @@ export default function Home() {
                             id={band.id}
                             name={band.name}
                             position={band.position}
-                            score={band.score}
+                            score={isAdmin ? band.score : undefined}
                           />
                         ))}
                       </div>
