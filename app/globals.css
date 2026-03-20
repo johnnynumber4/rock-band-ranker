@@ -25,3 +25,20 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Mobile touch improvements */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth momentum scrolling in overflow containers */
+[class*="overflow-y-auto"] {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe area padding for notched phones */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .fixed.bottom-0 {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

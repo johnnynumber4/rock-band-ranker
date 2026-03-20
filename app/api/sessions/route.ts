@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/mongodb';
 import { VotingSession } from '@/lib/types';
 import { BILLBOARD_BANDS } from '@/lib/bands';
+import { getAuthFromRequest } from '@/lib/auth';
 
 // Create new session or load existing
 export async function POST(request: NextRequest) {
   try {
+    const auth = await getAuthFromRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const { sessionName, action } = await request.json();
 
     if (!sessionName || sessionName.trim().length === 0) {
@@ -13,6 +19,11 @@ export async function POST(request: NextRequest) {
         { error: 'Session name is required' },
         { status: 400 }
       );
+    }
+
+    // Verify user owns this session
+    if (sessionName !== auth.displayName) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     const db = await getDatabase();
@@ -73,6 +84,11 @@ export async function POST(request: NextRequest) {
 // Save session progress
 export async function PUT(request: NextRequest) {
   try {
+    const auth = await getAuthFromRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const sessionData: VotingSession = await request.json();
 
     if (!sessionData.sessionName) {
@@ -80,6 +96,11 @@ export async function PUT(request: NextRequest) {
         { error: 'Session name is required' },
         { status: 400 }
       );
+    }
+
+    // Verify user owns this session
+    if (sessionData.sessionName !== auth.displayName) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     const db = await getDatabase();
