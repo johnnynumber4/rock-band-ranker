@@ -114,17 +114,11 @@ export async function PUT(request: NextRequest) {
     // Remove _id from update data if it exists
     delete updateData._id;
 
-    const result = await sessions.updateOne(
+    await sessions.updateOne(
       { sessionName: sessionData.sessionName },
-      { $set: updateData }
+      { $set: updateData },
+      { upsert: true }
     );
-
-    if (result.matchedCount === 0) {
-      return NextResponse.json(
-        { error: 'Session not found' },
-        { status: 404 }
-      );
-    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
