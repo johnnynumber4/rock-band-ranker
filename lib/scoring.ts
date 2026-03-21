@@ -1,23 +1,8 @@
 /**
- * Modified Borda Count scoring system with top-heavy weighting
- *
- * Positions 1-10: Each rank = 5 points apart (1st=500, 10th=455)
- * Positions 11-30: Each rank = 2 points apart
- * Positions 31-50+: Each rank = 1 point apart
+ * Simple linear scoring: 1st = 50 pts, 2nd = 49, ... 50th = 1
  */
 export function calculateScore(position: number): number {
-  if (position <= 10) {
-    // Top 10: 5 points per position
-    return 500 - ((position - 1) * 5);
-  } else if (position <= 30) {
-    // Positions 11-30: 2 points per position
-    const baseScore = 455; // Score at position 10
-    return baseScore - ((position - 10) * 2);
-  } else {
-    // Positions 31+: 1 point per position
-    const baseScore = 415; // Score at position 30
-    return baseScore - ((position - 30) * 1);
-  }
+  return Math.max(51 - position, 1);
 }
 
 export interface RankedBand {

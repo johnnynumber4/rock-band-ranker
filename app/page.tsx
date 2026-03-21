@@ -284,14 +284,14 @@ export default function Home() {
   const initializeDashboardWithAggregateData = (aggregatedResults: any[]) => {
     // Convert aggregated results to Band format
     const collaborativeTop50 = aggregatedResults.slice(0, 50).map((result: any) => ({
-      id: result.bandId || `band-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      name: result.bandName,
+      id: result.id || `band-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      name: result.name,
       isNewAddition: false // These are the collaborative results, not new additions
     }));
 
     const outsiders = aggregatedResults.slice(50).map((result: any) => ({
-      id: result.bandId || `band-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      name: result.bandName,
+      id: result.id || `band-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      name: result.name,
       isNewAddition: false
     }));
 
