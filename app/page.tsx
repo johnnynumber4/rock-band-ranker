@@ -77,6 +77,7 @@ export default function Home() {
   const [selectedBand, setSelectedBand] = useState<any>(null);
   const [showSoloArtistBanner, setShowSoloArtistBanner] = useState(true);
   const [roundLocks, setRoundLocks] = useState<Record<string, boolean>>({});
+  const [showRound1Rankings, setShowRound1Rankings] = useState(false);
 
   // Rounds 1 & 3: dedicated drag handle means we can use short distance constraint
   const sortableSensors = useSensors(
@@ -757,13 +758,16 @@ export default function Home() {
   };
 
   const goBack = () => {
-    if (currentRound === 'round2') setCurrentRound('round1');
-    else if (currentRound === 'round3') setCurrentRound('round2');
+    // Round 1 rankings are locked once submitted — no going back from round 2
+    if (currentRound === 'round3') setCurrentRound('round2');
     else if (currentRound === 'round4') setCurrentRound('round3');
     else if (currentRound === 'results') setCurrentRound(isAdmin ? 'round4' : 'round3');
   };
 
   const finishRound1 = () => {
+    if (!window.confirm('Are you sure? Once you submit, your Round 1 rankings are locked in and cannot be changed.')) {
+      return;
+    }
     setCurrentRound('round2');
   };
 
@@ -1574,6 +1578,14 @@ export default function Home() {
             <p className="text-spotify-light-gray text-sm sm:text-base max-w-md mx-auto">
               The admin hasn't opened this round yet. Sit tight — it'll be unlocked soon.
             </p>
+            {currentRound !== 'round1' && currentRound !== 'round2' && (
+              <button
+                onClick={goBack}
+                className="mt-6 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-6 rounded-full transition-all border border-spotify-light-gray/30"
+              >
+                ← Go Back
+              </button>
+            )}
           </div>
         )}
 
@@ -1652,6 +1664,41 @@ export default function Home() {
               <p className="text-spotify-light-gray mb-3 sm:mb-6 text-xs sm:text-base">
                 Add bands you think are missing from the Billboard top 50. We'll vote on their rankings in Round 3.
               </p>
+
+              {/* Collapsible Round 1 Rankings */}
+              <div className="mb-4 sm:mb-6 bg-spotify-gray/30 rounded-lg border border-spotify-gray overflow-hidden">
+                <button
+                  onClick={() => setShowRound1Rankings(!showRound1Rankings)}
+                  className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-spotify-gray/30 transition-colors"
+                >
+                  <span className="text-sm sm:text-base font-bold text-spotify-light-gray flex items-center gap-2">
+                    <span>🔒</span>
+                    My Round 1 Rankings
+                  </span>
+                  <svg className={`w-4 h-4 text-spotify-light-gray transition-transform ${showRound1Rankings ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/>
+                  </svg>
+                </button>
+                {showRound1Rankings && (
+                  <div className="px-3 sm:px-4 pb-3 sm:pb-4 border-t border-spotify-gray">
+                    <div className="space-y-1 max-h-[40vh] overflow-y-auto overscroll-contain pr-1 mt-3">
+                      {round1Bands.map((band, index) => (
+                        <div
+                          key={band.id}
+                          className="flex items-center bg-spotify-gray/50 rounded-lg p-2 sm:p-3"
+                        >
+                          <span className="text-sm sm:text-base font-bold text-spotify-light-gray w-7 sm:w-10 text-right flex-shrink-0">
+                            {index + 1}
+                          </span>
+                          <span className="text-xs sm:text-sm font-medium text-white truncate ml-2 sm:ml-3">
+                            {band.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Sticky Search Box */}
               <div className="mb-4 sm:mb-6 sticky top-0 bg-spotify-dark-gray z-10 pb-3 sm:pb-4 -mt-3 sm:-mt-4 pt-3 sm:pt-4">
@@ -1747,16 +1794,10 @@ export default function Home() {
                 </>
               )}
 
-              <div className="mt-4 sm:mt-6 flex gap-3">
-                <button
-                  onClick={goBack}
-                  className="flex-1 bg-spotify-gray hover:bg-spotify-gray/80 text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all border border-spotify-light-gray/30 text-sm sm:text-base"
-                >
-                  ← Back
-                </button>
+              <div className="mt-4 sm:mt-6">
                 <button
                   onClick={finishRound2}
-                  className="flex-1 bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
+                  className="w-full bg-spotify-green hover:bg-spotify-green-dark text-white font-bold py-3 px-4 sm:px-6 rounded-full transition-all transform hover:scale-[1.02] text-sm sm:text-base"
                 >
                   Round 3 →
                 </button>
