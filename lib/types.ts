@@ -43,6 +43,16 @@ export interface KnockedOutBand {
   knockedOutByName: string;
 }
 
+export interface RoundLocks {
+  _id?: string;
+  round1: boolean;
+  round2: boolean;
+  round3: boolean;
+  round4: boolean;
+  results: boolean;
+  updatedAt: Date;
+}
+
 export interface CollaborativeRanking {
   bandId: string;
   bandName: string;

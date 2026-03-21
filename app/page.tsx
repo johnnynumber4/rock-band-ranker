@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   DndContext,
   closestCenter,
+  pointerWithin,
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
@@ -12,6 +13,7 @@ import {
   DragEndEvent,
   DragStartEvent,
   DragCancelEvent,
+  DragOverEvent,
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
@@ -74,18 +76,38 @@ export default function Home() {
   const [insertedBandsPositions, setInsertedBandsPositions] = useState<Map<string, number>>(new Map());
   const [selectedBand, setSelectedBand] = useState<any>(null);
   const [showSoloArtistBanner, setShowSoloArtistBanner] = useState(true);
+  const [roundLocks, setRoundLocks] = useState<Record<string, boolean>>({});
 
-  const sensors = useSensors(
+  // Rounds 1 & 3: dedicated drag handle means we can use short distance constraint
+  const sortableSensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
-        delay: 150, // 150ms delay for more intentional dragging
-        tolerance: 5, // 5px movement tolerance
+        distance: 5,
       },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 200, // Slightly longer delay for touch to prevent accidental drags
-        tolerance: 8, // More tolerance for touch
+        delay: 50,
+        tolerance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Round 4: needs delay so click-to-select works without starting a drag
+  const round4Sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        delay: 150,
+        tolerance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -199,6 +221,24 @@ export default function Home() {
     checkAuth();
   }, []);
 
+  // Fetch round locks on mount and poll every 10 seconds
+  useEffect(() => {
+    const fetchLocks = () =>
+      fetch('/api/admin/round-locks')
+        .then(res => res.json())
+        .then(data => setRoundLocks({
+          round1: !!data.round1,
+          round2: !!data.round2,
+          round3: !!data.round3,
+          round4: !!data.round4,
+          results: !!data.results,
+        }))
+        .catch(() => {});
+    fetchLocks();
+    const interval = setInterval(fetchLocks, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Load collaborative rankings and initialize dashboard when admin reaches Round 4
   useEffect(() => {
     const loadCollaborativeData = async () => {
@@ -303,7 +343,16 @@ export default function Home() {
 
     if (draggedBand.source === 'picklist') {
       // Handle insertion from picklist
-      const dropPosition = parseInt(over.id.toString().replace('drop-zone-', ''));
+      // over.id could be "drop-zone-X" (from useDroppable) or a band ID (from useSortable)
+      let dropPosition: number;
+      const overId = over.id.toString();
+      if (overId.startsWith('drop-zone-')) {
+        dropPosition = parseInt(overId.replace('drop-zone-', ''));
+      } else {
+        const index = finalTop50.findIndex(band => band.id === overId);
+        dropPosition = index + 1;
+      }
+
       if (dropPosition >= 1 && dropPosition <= 50 && isValidDropPosition(dropPosition)) {
         insertBandAtPosition(draggedBand, dropPosition);
 
@@ -314,11 +363,19 @@ export default function Home() {
       }
     } else if (draggedBand.source === 'finalRankings') {
       // Handle reordering within final rankings
-      const oldPosition = finalTop50.findIndex(band => band.id === active.id);
-      const newPosition = parseInt(over.id.toString().replace('sortable-', '')) - 1;
+      const oldIndex = finalTop50.findIndex(band => band.id === active.id);
 
-      if (oldPosition !== -1 && newPosition >= 0 && newPosition < 50) {
-        reorderInFinalRankings(oldPosition, newPosition);
+      // over.id could be a band ID (from useSortable) or "drop-zone-X" (from useDroppable)
+      let newIndex = -1;
+      const overId = over.id.toString();
+      if (overId.startsWith('drop-zone-')) {
+        newIndex = parseInt(overId.replace('drop-zone-', '')) - 1;
+      } else {
+        newIndex = finalTop50.findIndex(band => band.id === overId);
+      }
+
+      if (oldIndex !== -1 && newIndex !== -1 && newIndex < finalTop50.length && oldIndex !== newIndex) {
+        reorderInFinalRankings(oldIndex, newIndex);
       }
     }
 
@@ -335,6 +392,23 @@ export default function Home() {
   const handleDragCancel = () => {
     setDraggedBand(null);
     setActiveDropZone(null);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event;
+    if (over) {
+      const overId = over.id.toString();
+      if (overId.startsWith('drop-zone-')) {
+        setActiveDropZone(parseInt(overId.replace('drop-zone-', '')));
+      } else {
+        const index = finalTop50.findIndex(band => band.id === overId);
+        if (index !== -1) {
+          setActiveDropZone(index + 1);
+        }
+      }
+    } else {
+      setActiveDropZone(null);
+    }
   };
 
   // Insert band with push-down logic
@@ -1490,8 +1564,21 @@ export default function Home() {
           </div>
         </header>
 
+        {/* Locked Round Screen */}
+        {!isAdmin && roundLocks[currentRound] && (
+          <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-6 sm:p-10 lg:p-14 border border-spotify-gray text-center">
+            <div className="text-5xl sm:text-6xl mb-4">🔒</div>
+            <h2 className="text-xl sm:text-3xl font-bold text-white mb-3">
+              This Round is Locked
+            </h2>
+            <p className="text-spotify-light-gray text-sm sm:text-base max-w-md mx-auto">
+              The admin hasn't opened this round yet. Sit tight — it'll be unlocked soon.
+            </p>
+          </div>
+        )}
+
         {/* Round 1: Rerank Billboard's 50 */}
-        {currentRound === 'round1' && !isAdmin && (
+        {currentRound === 'round1' && !isAdmin && !roundLocks[currentRound] && (
           <div>
             <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
               <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
@@ -1523,7 +1610,7 @@ export default function Home() {
               )}
 
               <DndContext
-                sensors={sensors}
+                sensors={sortableSensors}
                 collisionDetection={closestCenter}
                 onDragEnd={handleRound1DragEnd}
               >
@@ -1556,7 +1643,7 @@ export default function Home() {
         )}
 
         {/* Round 2: Add Missing Bands */}
-        {currentRound === 'round2' && !isAdmin && (
+        {currentRound === 'round2' && !isAdmin && !roundLocks[currentRound] && (
           <div>
             <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
               <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
@@ -1679,7 +1766,7 @@ export default function Home() {
         )}
 
         {/* Round 3: Rank All User-Added Bands */}
-        {currentRound === 'round3' && !isAdmin && (
+        {currentRound === 'round3' && !isAdmin && !roundLocks[currentRound] && (
           <div>
             <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
               <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
@@ -1710,7 +1797,7 @@ export default function Home() {
               ) : (
                 <>
                   <DndContext
-                    sensors={sensors}
+                    sensors={sortableSensors}
                     collisionDetection={closestCenter}
                     onDragEnd={handleRound3DragEnd}
                   >
@@ -1757,9 +1844,11 @@ export default function Home() {
           <div>
             {isAdmin ? (
               <DndContext
-                sensors={sensors}
+                sensors={round4Sensors}
+                collisionDetection={pointerWithin}
                 onDragEnd={handleDragEnd}
                 onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
                 onDragCancel={handleDragCancel}
               >
                 {/* Invite Codes Panel */}
@@ -1999,7 +2088,7 @@ export default function Home() {
         )}
 
         {/* Results */}
-        {currentRound === 'results' && (
+        {currentRound === 'results' && (!roundLocks[currentRound] || isAdmin) && (
           <div>
             <div className="bg-spotify-dark-gray rounded-xl sm:rounded-2xl shadow-2xl p-3 sm:p-6 lg:p-8 mb-4 sm:mb-6 border border-spotify-gray">
               <h2 className="text-lg sm:text-3xl font-bold text-white mb-1 sm:mb-2">
